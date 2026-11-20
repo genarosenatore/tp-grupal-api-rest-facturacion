@@ -1,0 +1,7 @@
+{
+  "nombre": "Cliente de demostración",
+  "documento": "34567890",
+  "tipoDocumento": 96,
+  "condicionIvaReceptorId": 5,
+  "domicilio": "Calle del Ejemplo 123, Ciudad de Prueba"
+}

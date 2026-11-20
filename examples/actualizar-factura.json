@@ -1,0 +1,14 @@
+{
+  "fecha": "2026-11-11",
+  "clienteId": 1,
+  "condicionIvaId": 1,
+  "puntoVentaId": 1,
+  "tipoMonedaId": 1,
+  "tipoDescuento": "MONTO_FIJO",
+  "valorDescuento": 50,
+  "condicionVenta": "Cuenta corriente",
+  "observaciones": "Edición completa de un borrador local",
+  "detalles": [
+    { "articuloId": 2, "cantidad": 4 }
+  ]
+}

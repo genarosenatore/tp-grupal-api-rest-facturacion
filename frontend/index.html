@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="es-AR">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="theme-color" content="#142b4d"><link rel="icon" href="/favicon.svg" type="image/svg+xml"><title>Facturación · Gestión de ventas</title></head>
+<body>
+  <header class="topbar"><a class="brand" href="#"><span class="brand-icon">F</span> Facturación<span class="brand-tag">ENTORNO DE PRUEBA</span></a><span id="connection" role="status">Conectando con el servidor…</span></header>
+  <main>
+    <div class="page-heading"><div><p class="eyebrow">ADMINISTRACIÓN / COMPROBANTES</p><h1>Facturas de venta<span>.</span></h1><p class="muted">Consultá tus ventas y registrá cada detalle en un solo lugar.</p></div><div class="page-heading-actions"><button id="manage-catalog" class="button secondary" disabled>Administrar catálogo</button><button id="new-invoice" class="button primary" disabled>+ Nueva factura</button></div></div>
+    <div id="notice" class="notice" role="status" hidden></div>
+    <p class="notice warning">Entorno de prueba · Los comprobantes no tienen validez fiscal.</p>
+    <div id="global-error" class="notice error" role="alert" hidden></div>
+    <section id="busqueda" class="panel" aria-labelledby="search-title">
+      <div class="panel-heading"><div><p class="eyebrow">CONSULTAR</p><h2 id="search-title">Búsqueda y filtros</h2></div><button id="reload" class="button secondary">Actualizar datos</button></div>
+      <form id="filters" class="filters invoice-filters">
+        <label class="filter-number">Número de factura<input type="number" name="numero" min="1" step="1" placeholder="Ej.: 123" aria-describedby="search-number-hint"></label>
+        <label class="filter-customer">Cliente<select name="clienteId" id="filter-client" aria-haspopup="dialog" aria-controls="client-dialog" disabled><option value="">Todos los clientes</option></select></label>
+        <label class="filter-list">Lista de precios<select name="listaPrecioId" id="filter-price-list"><option value="">Todas las listas</option></select></label>
+        <label class="filter-state">Estado del comprobante<select name="estado"><option value="">Todos los estados</option><option value="EMITIDA">Emitida</option><option value="ANULADA">Anulada</option></select></label>
+        <label class="filter-arca">Envío a ARCA<select name="informadaArca"><option value="">Todos</option><option value="true">Informadas</option><option value="false">No informadas</option></select></label>
+        <label class="filter-from">Fecha desde<input type="date" name="desde" aria-describedby="search-dates-hint"></label><label class="filter-to">Fecha hasta<input type="date" name="hasta" aria-describedby="search-dates-hint"></label>
+        <div class="filter-actions"><div class="filter-buttons"><button type="submit" class="button primary" id="search-button"><svg class="button-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true" focusable="false"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4.5 4.5"/></svg><span id="search-button-label">Buscar</span></button><button type="reset" class="button secondary">Limpiar filtros</button></div><p id="filter-instructions" class="hint" role="status">Completá los filtros y presioná Buscar o Enter.</p></div>
+      </form>
+      <div class="applied-filters"><p id="filter-summary" class="hint" role="status">Todas las facturas</p><div id="filter-chips" aria-label="Filtros aplicados"></div></div>
+      <p class="hint search-help"><span id="search-number-hint">Buscá por el número fiscal, que es distinto del ID interno.</span> <span id="search-dates-hint">Las fechas corresponden a la emisión e incluyen ambos días.</span></p>
+    </section>
+    <dialog id="invoice-dialog" aria-labelledby="form-title">
+      <div class="panel-heading"><div><p class="eyebrow">REGISTRAR</p><h2 id="form-title">Nueva factura</h2></div><button type="button" class="button secondary" data-close="invoice-dialog">Cerrar</button></div>
+      <form id="invoice-form">
+        <fieldset id="invoice-fields" disabled>
+          <div id="form-error" class="notice error" role="alert" hidden></div>
+          <p class="invoice-intro">Elegí el cliente y agregá los artículos. Sus datos y precios se completan automáticamente.</p>
+          <input type="hidden" name="listaPrecioId" value="">
+          <h3 class="invoice-section-title">1. Cliente y comprobante</h3>
+          <div class="form-grid">
+            <div class="client-field invoice-client-field">
+              <label for="invoice-client">Cliente *</label><select id="invoice-client" name="clienteId" required aria-describedby="selected-client"></select><span id="selected-client" class="sr-only"></span>
+              <div id="client-data" class="client-data" hidden>
+                <dl class="client-facts" aria-label="Datos del cliente seleccionado">
+                  <div><dt>Documento</dt><dd id="client-document"></dd></div>
+                  <div><dt>Condición fiscal</dt><dd id="client-condition"></dd></div>
+                  <div class="client-address"><dt>Domicilio</dt><dd id="client-address"></dd></div>
+                </dl>
+                <p class="hint">Modificá estos datos desde «Editar ficha» en el selector de cliente.</p>
+              </div>
+            </div>
+            <label>Tipo de comprobante<select name="tipoComprobante" aria-describedby="receipt-options-hint"><option value="11">Factura C · Homologación</option><option value="1">Factura A · Homologación</option><option value="6">Factura B · Homologación</option><option value="">Comprobante X · Sin envío fiscal</option></select><span id="receipt-options-hint" class="hint" role="status"></span></label>
+            <label>Fecha *<input name="fecha" type="date" required></label>
+            <label>Punto de venta *<select name="puntoVentaId" required></select></label><label id="local-iva-field">Condición de IVA *<select name="condicionIvaId" required></select></label>
+            <label>Moneda *<select name="tipoMonedaId" required></select></label>
+            <label>Condición de venta<input name="condicionVenta" maxlength="80" placeholder="Ej.: contado o cuenta corriente"></label>
+          </div>
+          <p class="hint" id="circuit-description">Factura C en homologación: el precio de lista se toma como precio final, sin discriminar IVA.</p>
+          <div class="line-heading"><div><h3>2. Artículos</h3><p class="hint" id="invoice-list-context">Elegí la lista de precios al agregar el primer artículo.</p><p class="hint" id="line-hint"></p></div><div class="invoice-article-actions"><button id="change-price-list" type="button" class="button secondary" hidden>Cambiar lista</button><button id="add-line" type="button" class="button primary">+ Agregar artículo</button></div></div>
+          <div id="invoice-empty" class="invoice-empty"><span aria-hidden="true">+</span><strong>Todavía no agregaste artículos</strong><p>Usá «Agregar artículo» para elegir un producto y su precio.</p></div>
+          <p id="invoice-list-status" class="hint" role="status" hidden></p>
+          <div id="invoice-lines" class="table-wrap" hidden><table class="line-table"><caption class="sr-only">Artículos de la factura</caption><thead><tr><th>Artículo *</th><th>Cantidad *</th><th class="numeric">Precio unitario</th><th class="numeric">IVA %</th><th class="numeric">Total</th><th>Acción</th></tr></thead><tbody id="form-lines"></tbody></table></div>
+          <div id="price-warning" class="notice warning" role="status" hidden>Hay artículos sin precio en la lista y moneda seleccionadas. Cargá sus precios, cambiá la selección o quitá esos renglones.</div>
+          <h3 class="invoice-section-title invoice-review-title">3. Descuento y total</h3>
+          <div class="form-grid discount-fields"><label>Descuento general<select name="tipoDescuento"><option value="SIN_DESCUENTO">Sin descuento</option><option value="PORCENTAJE">Porcentaje (%)</option><option value="MONTO_FIJO">Monto fijo</option></select></label><label>Valor del descuento<input name="valorDescuento" type="number" min="0" max="99999999999999999.99" step="0.01" value="0" required disabled><span id="discount-hint" class="hint">Se aplica sobre el subtotal antes de IVA.</span></label></div>
+          <div class="form-bottom"><label>Observaciones <span class="muted">(opcional)</span><textarea name="observaciones" maxlength="1000" rows="3" placeholder="Información adicional del comprobante"></textarea></label><dl class="totals"><div><dt>Subtotal antes de descuento</dt><dd id="preview-subtotal">—</dd></div><div><dt>Descuento general</dt><dd id="preview-discount">—</dd></div><div><dt>Neto con descuento</dt><dd id="preview-net">—</dd></div><div><dt>IVA</dt><dd id="preview-tax">—</dd></div><div class="grand-total"><dt>Total estimado</dt><dd id="preview-total">—</dd></div></dl></div>
+          <p class="hint">Los importes definitivos se calculan al guardar la factura.</p>
+          <div class="form-actions"><button id="reset-invoice" type="button" class="button secondary">Limpiar formulario</button><button id="save-invoice" class="button primary">Crear factura</button></div>
+        </fieldset>
+      </form>
+    </dialog>
+    <section id="listado" class="panel" aria-labelledby="list-title">
+      <div class="panel-heading"><div><p class="eyebrow">GESTIONAR</p><h2 id="list-title">Comprobantes registrados <span id="result-count" class="count">0</span></h2></div><span class="hint">Importes confirmados por el servidor</span></div>
+      <p id="table-status" class="empty" role="status">Cargando facturas…</p>
+      <div id="invoice-table-wrap" class="table-wrap" hidden><table><caption class="sr-only">Facturas registradas</caption><thead><tr><th>Número / Fecha</th><th>Cliente</th><th class="numeric">Neto</th><th class="numeric">IVA</th><th class="numeric">Total</th><th>Estado</th><th>Acciones</th></tr></thead><tbody id="invoice-rows"></tbody></table></div>
+      <div class="pagination"><span id="page-info"></span><div><button id="previous" class="button secondary" disabled aria-label="Página anterior">←</button><span id="page-number">1 / 1</span><button id="next" class="button secondary" disabled aria-label="Página siguiente">→</button></div></div>
+    </section>
+    <footer>Facturación · Gestión de ventas<span>La validez fiscal depende de la autorización de ARCA.</span></footer>
+  </main>
+  <dialog id="detail-dialog" aria-labelledby="detail-title"><div class="panel-heading"><h2 id="detail-title">Detalle de factura</h2><button class="button secondary" data-close="detail-dialog">Cerrar</button></div><div id="detail-content" class="dialog-body"></div><div id="detail-actions" class="dialog-actions"></div></dialog>
+  <dialog id="state-dialog" class="small-dialog" aria-labelledby="state-title"><form id="state-form"><div class="panel-heading"><h2 id="state-title">Anular factura</h2><button type="button" class="button secondary" data-close="state-dialog">Cerrar</button></div><div class="dialog-body"><p id="state-description"></p><div id="state-error" class="notice error" role="alert" hidden></div><label>Motivo de anulación<textarea name="motivo" required maxlength="1000" rows="3"></textarea></label><p class="hint">Las facturas autorizadas requieren un comprobante de ajuste asociado autorizado por ARCA. Si el circuito no está configurado, se conservará su estado.</p></div><div class="dialog-actions"><button id="save-state" class="button danger">Anular factura</button></div></form></dialog>
+  <dialog id="client-dialog" aria-labelledby="client-title"><div class="panel-heading"><h2 id="client-title">Buscar cliente</h2><div class="dialog-heading-actions"><button type="button" id="new-client" class="button primary">+ Nuevo cliente</button><button class="button secondary" data-close="client-dialog">Cancelar</button></div></div><p id="client-context" class="hint explorer-context"></p><form id="client-filters" class="filters"><label>Nombre o documento<input name="q" type="search" placeholder="Ej.: Ana o 12345678"></label><label>Documento<input name="documento" placeholder="DNI o CUIT"></label><button type="submit" class="button primary"><svg class="button-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true" focusable="false"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4.5 4.5"/></svg><span>Buscar</span></button><button type="reset" class="button secondary">Limpiar</button></form><div class="client-results-heading"><p id="client-status" class="hint" role="status"></p><button type="button" id="show-all-clients" class="button secondary">Ver todos los clientes</button></div><div class="table-wrap"><table><thead><tr><th>Nombre</th><th>Documento</th><th>Condición fiscal</th><th>Acción</th></tr></thead><tbody id="client-rows"></tbody></table></div><div class="dialog-actions"><button type="button" id="all-clients" class="button secondary" hidden>Quitar filtro de cliente</button></div></dialog>
+  <dialog id="client-edit-dialog" class="small-dialog" aria-labelledby="client-edit-title"><form id="client-edit-form">
+    <div class="panel-heading"><h2 id="client-edit-title">Ficha del cliente</h2><button type="button" class="button secondary" data-close="client-edit-dialog">Cerrar</button></div>
+    <fieldset id="client-edit-fields"><div id="client-edit-error" class="notice error" role="alert" hidden></div><div class="form-grid">
+      <label>Nombre o razón social *<input name="nombre" required maxlength="120"></label>
+      <label>Tipo de documento *<select name="tipoDocumento" required><option value="96">DNI</option><option value="80">CUIT</option><option value="99">Sin identificar</option></select></label>
+      <label>Número de documento *<input name="documento" required maxlength="30" inputmode="numeric"></label>
+      <label>Condición fiscal *<select name="condicionIvaReceptorId" required><option value="5">Consumidor final</option><option value="1">IVA Responsable Inscripto</option><option value="4">IVA Sujeto Exento</option><option value="6">Responsable Monotributo</option></select></label>
+      <label>Domicilio<input name="domicilio" maxlength="250"></label>
+    </div><p class="hint">Los cambios se aplican a las nuevas facturas. Los comprobantes guardados conservan sus datos históricos.</p></fieldset>
+    <div class="dialog-actions"><button id="save-client" class="button primary">Guardar cliente</button></div>
+  </form></dialog>
+  <dialog id="price-dialog" aria-labelledby="price-title">
+    <div class="panel-heading"><h2 id="price-title">Agregar artículo</h2><div class="dialog-heading-actions"><div id="catalog-actions" class="dialog-heading-actions" hidden><button type="button" id="new-price-list" class="button secondary">+ Nueva lista</button><button type="button" id="set-price" class="button secondary">Cargar precio</button><button type="button" id="new-product" class="button primary">+ Nuevo producto</button></div><button type="button" class="button secondary" data-close="price-dialog">Cerrar</button></div></div>
+    <form id="price-filters" class="filters"><label>Lista de precios<select name="listaPrecioId"></select></label><label>Código o descripción<input name="q" type="search" placeholder="Ej.: A1 o cuaderno"></label><label>Moneda<select name="monedaId"></select></label><label>IVA %<input name="iva" type="number" min="0" max="100" step="0.01"></label><button type="submit" class="button primary"><svg class="button-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true" focusable="false"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4.5 4.5"/></svg><span>Buscar</span></button><button type="reset" class="button secondary">Limpiar</button></form>
+    <p id="price-context" class="hint explorer-context"></p><div id="price-alert" class="notice warning explorer-alert" role="alert" tabindex="-1" hidden></div>
+    <p id="price-status" class="hint dialog-body" role="status"></p><div id="price-results" class="table-wrap" hidden><table><thead><tr><th>Código</th><th>Artículo</th><th>Lista</th><th>Moneda</th><th>Precio</th><th>IVA</th><th>Acción</th></tr></thead><tbody id="price-rows"></tbody></table></div>
+    <div class="dialog-actions"><button type="button" id="manage-from-picker" class="button secondary">Administrar catálogo</button><button type="button" id="back-to-selection" class="button secondary" hidden>Volver a elegir artículos</button></div>
+  </dialog>
+  <dialog id="change-list-dialog" aria-labelledby="change-list-title">
+    <form id="change-list-form"><div class="panel-heading"><h2 id="change-list-title">Cambiar lista de precios</h2><button type="button" class="button secondary" data-close="change-list-dialog">Cancelar</button></div>
+      <div class="dialog-body"><p id="change-list-description"></p><label>Nueva lista de precios<select name="listaPrecioId" required></select></label><p class="hint">Se conservan los artículos, cantidades y descuento. Revisá los precios antes de confirmar.</p>
+        <div id="change-list-error" class="notice error" role="alert" hidden></div><p id="change-list-loading" role="status" hidden>Consultando todos los precios…</p>
+        <div id="change-list-preview" hidden><p id="change-list-impact" class="notice"></p><div class="table-wrap"><table><thead><tr><th>Artículo</th><th>Cantidad</th><th>Precio actual</th><th>Precio nuevo</th></tr></thead><tbody id="change-list-rows"></tbody></table></div><p class="hint">Los cambios se guardan al guardar la factura.</p></div>
+      </div><div class="dialog-actions"><button id="preview-price-list" class="button secondary">Consultar precios</button><button id="apply-price-list" type="button" class="button primary" hidden>Confirmar cambio de lista</button></div>
+    </form>
+  </dialog>
+  <dialog id="list-dialog" class="small-dialog" aria-labelledby="list-title">
+    <form id="list-form"><div class="panel-heading"><h2 id="list-title">Nueva lista de precios</h2><button type="button" class="button secondary" data-close="list-dialog">Cerrar</button></div>
+      <div class="dialog-body"><div id="list-error" class="notice error" role="alert" hidden></div><label>Nombre de la lista *<input name="nombre" required maxlength="80" placeholder="Ej.: Distribuidores"></label><p class="hint">La lista se crea vacía. Después usá Cargar precio para agregar productos con sus precios.</p></div>
+      <div class="dialog-actions"><button class="button primary">Crear lista</button></div>
+    </form>
+  </dialog>
+  <dialog id="price-entry-dialog" class="small-dialog" aria-labelledby="price-entry-title">
+    <form id="price-entry-form"><div class="panel-heading"><h2 id="price-entry-title">Cargar o editar precio</h2><button type="button" class="button secondary" data-close="price-entry-dialog">Cerrar</button></div>
+      <div class="dialog-body"><div id="price-entry-error" class="notice error" role="alert" hidden></div><div class="form-grid">
+        <label>Lista de precios *<select name="listaPrecioId" required></select></label><label>Producto *<select name="articuloId" required></select></label><label>Moneda *<select name="tipoMonedaId" required></select></label><label>Precio *<input name="precio" type="number" required min="0" max="9999999999999.99" step="0.01"></label>
+      </div><p id="price-entry-hint" class="hint"></p><p class="hint">Las facturas guardadas conservan sus importes históricos.</p></div>
+      <div class="dialog-actions"><button class="button primary">Guardar precio</button></div>
+    </form>
+  </dialog>
+  <dialog id="product-dialog" aria-labelledby="product-title">
+    <form id="product-form">
+      <div class="panel-heading"><div><p class="eyebrow">CATÁLOGO DE ARTÍCULOS</p><h2 id="product-title">Nuevo producto</h2></div><button type="button" class="button secondary" data-close="product-dialog">Cerrar</button></div>
+      <fieldset id="product-fields">
+        <div id="product-error" class="notice error" role="alert" hidden></div>
+        <div class="form-grid">
+          <label>Código *<input name="codigo" required maxlength="30" placeholder="Ej.: ART-004" autocomplete="off"></label>
+          <label>Moneda *<select name="tipoMonedaId" required></select></label>
+          <label>Lista de precios *<select name="listaPrecioId" required></select></label>
+          <label class="product-description">Descripción *<input name="descripcion" required maxlength="150" placeholder="Nombre del producto"></label>
+          <label>IVA del producto (%) *<input name="alicuotaIva" type="number" required min="0" max="100" step="0.01" value="21"></label>
+          <label>Precio de lista *<input name="precio" type="number" required min="0" max="9999999999999.99" step="0.01" placeholder="0,00"></label>
+        </div>
+        <p class="hint">El producto y su precio se guardan en el catálogo. Después podrás seleccionarlo para agregarlo a esta factura.</p>
+        <p class="hint">En Factura C, el precio de lista es final y no se discrimina IVA. En A/B y en el comprobante local, el precio es neto y se suma el IVA del artículo.</p>
+      </fieldset>
+      <div class="dialog-actions"><button type="button" id="cancel-product" class="button secondary" data-close="product-dialog">Cancelar</button><button id="save-product" class="button primary">Guardar producto</button></div>
+    </form>
+  </dialog>
+  <dialog id="confirm-dialog" class="small-dialog" aria-labelledby="confirm-title" aria-describedby="confirm-description"><div class="panel-heading"><h2 id="confirm-title">Confirmar operación</h2></div><p id="confirm-description" class="dialog-body"></p><div class="dialog-actions"><button id="confirm-no" class="button secondary" autofocus>Volver</button><button id="confirm-yes" class="button danger">Confirmar</button></div></dialog>
+  <noscript>Activá JavaScript para utilizar el sistema de facturación.</noscript>
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

@@ -1,0 +1,341 @@
+import { test, expect } from '@playwright/test';
+import { agregarArticulo, accionFactura } from './seleccion';
+import type { FacturaReporteDTO, PaginaDTO } from '../../src/models/factura.dto';
+import type { CatalogosDTO } from '../../src/models/catalogos.dto';
+
+test('modal, exploradores, guardar/editar con filtros, PDF, anulación y DELETE', async ({ page, request }) => {
+  const errors: string[] = []; page.on('pageerror', e => errors.push(e.message));
+  const c: CatalogosDTO = await (await request.get('/api/catalogos')).json();
+  await page.goto('/'); await expect(page.locator('#connection')).toHaveText('● API conectada');
+  await expect(page.locator('#invoice-dialog')).not.toBeVisible();
+  await page.locator('#filters [name=clienteId]').selectOption(String(c.clientes[0].id));
+  await page.locator('#filters [name=informadaArca]').selectOption('false');
+  await page.locator('#search-button').click();
+  await page.locator('#new-invoice').click();
+  const form = page.locator('#invoice-form'); await form.locator('[name=observaciones]').fill('Borrador persistente');
+  await expect(form.locator('#invoice-letter')).toHaveCount(0);
+  await expect(form.locator('#search-client')).toHaveCount(0);
+  await expect(form.locator('[name=listaPrecioId]')).toHaveAttribute('type','hidden');
+  await expect(form.locator('[name=tipoComprobante] option:checked')).toHaveText('Comprobante X · Sin envío fiscal');
+  await page.locator('#invoice-client').click();
+  await page.locator('#client-filters [name=q]').fill(c.clientes[0].nombre);
+  await page.locator('#client-filters button[type=submit]').click();
+  await expect(page.locator('#client-rows tr')).toHaveCount(1); await page.locator('#client-rows [data-client]').click();
+  await expect(form.locator('[name=clienteId]')).toHaveValue(String(c.clientes[0].id));
+  await expect(form.locator('#client-address')).toHaveText(c.clientes[0].domicilio?.trim() || 'No informado');
+  await form.locator('[name=condicionVenta]').fill('Contado');
+  await page.locator('#invoice-client').click(); await page.locator('[data-close=client-dialog]').click();
+  await expect(form.locator('[name=observaciones]')).toHaveValue('Borrador persistente');
+  await form.locator('[name=puntoVentaId]').selectOption(String(c.puntosVenta[0].id));
+  await expect(form.locator('[name=condicionIvaId]')).toHaveValue(String(c.condicionesIva[0].id));
+  const price = c.precios[0]; await form.locator('[name=tipoMonedaId]').selectOption(String(price.tipoMonedaId));
+  await page.locator('#add-line').click(); const article = c.articulos.find(a => a.id === price.articuloId)!;
+  await page.locator('#price-filters [name=listaPrecioId]').selectOption(String(price.listaPrecioId));
+  await page.locator('#price-filters [name=q]').fill(article.codigo);
+  await page.locator('#price-filters [name=iva]').fill(String(article.alicuotaIva));
+  await page.locator('#price-filters button[type=submit]').click();
+  await expect(page.locator('#price-rows tr')).toHaveCount(1); await page.locator('#price-rows [data-price-article]').click();
+  await expect(page.locator('.line-article')).toHaveValue(String(article.id));
+  const cantidad = page.locator('.line-quantity');
+  await expect(cantidad).toHaveValue('1');
+  await cantidad.press('ArrowUp'); await expect(cantidad).toHaveValue('2');
+  await cantidad.press('ArrowUp'); await expect(cantidad).toHaveValue('3');
+  await cantidad.press('ArrowDown'); await expect(cantidad).toHaveValue('2');
+  await cantidad.press('ArrowDown'); await expect(cantidad).toHaveValue('1');
+  await cantidad.press('ArrowDown'); await expect(cantidad).toHaveValue('1');
+  await cantidad.press('ArrowUp'); await expect(cantidad).toHaveValue('2');
+  await page.locator('#add-line').click(); await page.locator('[data-close=price-dialog]').click();
+  await expect(page.locator('.line-quantity')).toHaveValue('2');
+  await page.route('**/api/facturas', route => route.request().method() === 'POST'
+    ? route.fulfill({ status: 409, json: { mensaje: 'Rechazo controlado al guardar', errores: [] } }) : route.continue());
+  await page.locator('#save-invoice').click(); await expect(page.locator('#form-error')).toContainText('Rechazo controlado');
+  await expect(page.locator('#invoice-dialog')).toBeVisible(); await expect(page.locator('.line-quantity')).toHaveValue('2');
+  await page.unroute('**/api/facturas');
+  const createdPromise = page.waitForResponse(r => r.request().method() === 'POST' && r.url().endsWith('/api/facturas'));
+  await page.locator('#save-invoice').click(); const created = await createdPromise;
+  expect(created.status()).toBe(201); const f: FacturaReporteDTO = await created.json();
+  expect(f.letraComprobante).toBe('X');
+  expect(f.detalles[0].cantidad).toBe(2);
+  expect(f.clienteDomicilio).toBe(c.clientes[0].domicilio); expect(f.condicionVenta).toBe('Contado');
+  await expect(page.locator('#invoice-dialog')).not.toBeVisible();
+  await expect(page.locator(`[data-detail="${f.id}"]`).locator('xpath=ancestor::tr')).toContainText('Comprobante X');
+  await expect(page.locator('#filters [name=clienteId]')).toHaveValue(String(c.clientes[0].id));
+  await expect(page.locator('#filters [name=informadaArca]')).toHaveValue('false');
+  await accionFactura(page,f.id,'edit'); await expect(page.locator('#invoice-dialog')).toBeVisible();
+  await expect(form.locator('#client-address')).toHaveText(c.clientes[0].domicilio?.trim() || 'No informado');
+  await expect(form.locator('[name=condicionVenta]')).toHaveValue('Contado');
+  await expect(page.locator('.line-quantity')).toHaveValue('2');
+  await page.locator('.line-quantity').press('ArrowUp'); await expect(page.locator('.line-quantity')).toHaveValue('3');
+  await page.locator('#save-invoice').click(); await expect(page.locator('#invoice-dialog')).not.toBeVisible();
+  await page.locator(`[data-detail="${f.id}"]`).click();
+  await expect(page.locator('#detail-content')).toContainText('Comprobante X · Documento no válido como factura');
+  const downloadPromise = page.waitForEvent('download'); await page.locator('#detail-actions a').click();
+  expect((await downloadPromise).suggestedFilename()).toBe(`factura-${f.id}.pdf`);
+  await expect(page.locator('#authorize-invoice')).toHaveCount(0);
+  expect((await (await request.get(`/api/facturas/${f.id}`)).json()).informadaArca).toBeFalsy();
+  await page.locator('[data-close=detail-dialog]').click();
+  await accionFactura(page,f.id,'void'); await page.locator('#state-form [name=motivo]').fill('Error de carga desde navegador');
+  await page.locator('#save-state').click(); await page.locator('#confirm-no').click();
+  await expect(page.locator('#state-dialog')).toBeVisible();
+  await page.locator('#save-state').click(); await page.locator('#confirm-yes').click();
+  await expect(page.locator('#detail-content')).toContainText('ANULADA');
+  await expect(page.locator('#detail-content')).toContainText('Anulada sin autorización fiscal');
+  await expect(page.locator('#edit-invoice')).toHaveCount(0); await expect(page.locator('#delete-invoice')).toHaveCount(0);
+  await page.locator('[data-close=detail-dialog]').click();
+  const borrador = await request.post('/api/facturas', { data: { fecha: f.fecha, clienteId: f.clienteId, condicionIvaId: f.condicionIvaId, puntoVentaId: f.puntoVentaId, tipoMonedaId: f.tipoMonedaId, detalles: [{ articuloId: article.id, cantidad: 1 }] } });
+  expect(borrador.status()).toBe(201); const b: FacturaReporteDTO = await borrador.json();
+  await page.locator('#reload').click(); await accionFactura(page,b.id,'delete');
+  await page.locator('#confirm-no').click();
+  expect((await request.get(`/api/facturas/${b.id}`)).status()).toBe(200);
+  await page.locator('#delete-invoice').click(); await page.locator('#confirm-yes').click();
+  await expect(page.locator('#detail-dialog')).not.toBeVisible(); expect((await request.get(`/api/facturas/${b.id}`)).status()).toBe(404);
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
+  await page.screenshot({ path: '../tmp/browser-results/facturas-movil.png', fullPage: true }); expect(errors).toEqual([]);
+});
+
+test('paginación del servidor, filtros combinados, fechas, vacíos y errores', async ({ page, request }) => {
+  const c: CatalogosDTO = await (await request.get('/api/catalogos')).json(); const p = c.precios[0]; const ids: number[] = [];
+  try {
+    for (let i = 0; i < 10; i++) {
+      const response = await request.post('/api/facturas', { data: { fecha: '2026-10-23', clienteId: c.clientes[0].id, condicionIvaId: c.condicionesIva[0].id, puntoVentaId: c.puntosVenta[0].id, tipoMonedaId: p.tipoMonedaId, detalles: [{ articuloId: p.articuloId, cantidad: 1 }] } });
+      expect(response.status()).toBe(201); ids.push((await response.json()).id);
+    }
+    await page.goto('/'); await expect(page.locator('#connection')).toHaveText('● API conectada');
+    const next = page.waitForResponse(r => r.url().includes('page=1'));
+    await page.locator('#next').click(); const second: PaginaDTO<FacturaReporteDTO> = await (await next).json();
+    expect(second.page).toBe(1); expect(second.totalElements).toBeGreaterThanOrEqual(10);
+    await page.locator('#filters [name=clienteId]').selectOption(String(c.clientes[0].id));
+    await expect(page.locator('#page-number')).toHaveText(/^2 \/ /);
+    await page.locator('#filters [name=desde]').fill('2026-10-23'); await page.locator('#filters [name=hasta]').fill('2026-10-23');
+    await page.locator('#filters [name=informadaArca]').selectOption('false');
+    const filtered = page.waitForResponse(r => r.url().includes('informadaArca=false') && r.url().includes('hasta=2026-10-23'));
+    await page.locator('#search-button').click(); const rows: PaginaDTO<FacturaReporteDTO> = await (await filtered).json();
+    await expect(page.locator('#page-number')).toHaveText(/^1 \/ /);
+    expect(rows.content.every(f => f.clienteId === c.clientes[0].id && f.fecha === '2026-10-23' && !f.informadaArca)).toBeTruthy();
+    await expect(page.locator('#filter-summary')).toHaveText('4 filtros aplicados');
+    await expect(page.locator('#filter-chips button')).toHaveCount(4);
+    await expect(page.locator('#search-button .button-icon')).toHaveCount(1);
+    await expect(page.locator('#client-filters button[type=submit] .button-icon')).toHaveCount(1);
+    await expect(page.locator('#price-filters button[type=submit] .button-icon')).toHaveCount(1);
+    const sinCliente = page.waitForResponse(r => {
+      const url = new URL(r.url()); return url.pathname === '/api/facturas' && !url.searchParams.has('clienteId') && url.searchParams.get('hasta') === '2026-10-23';
+    });
+    await page.locator('#filter-chips [data-remove-filter=clienteId]').click();
+    await expect(page.locator('#filter-instructions')).toContainText('cambios sin aplicar');
+    await page.locator('#search-button').click(); await sinCliente;
+    await expect(page.locator('#filter-client')).toHaveValue('');
+    await expect(page.locator('#filter-summary')).toHaveText('3 filtros aplicados');
+    await expect(page.locator('#filters [name=desde]')).toHaveValue('2026-10-23');
+    await page.locator('#filters [name=clienteId]').selectOption(String(c.clientes[0].id));
+    await page.locator('#search-button').click();
+    await expect(page.locator('#filter-summary')).toHaveText('4 filtros aplicados');
+    await page.locator('#busqueda').screenshot({ path:'../tmp/browser-results/filtros-mejorados-escritorio.png' });
+    await page.setViewportSize({ width:390,height:844 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await page.locator('#busqueda').screenshot({ path:'../tmp/browser-results/filtros-mejorados-movil.png' });
+    await page.setViewportSize({ width:1280,height:720 });
+    await page.locator('#filters [name=desde]').fill('2099-01-01'); await page.locator('#search-button').click();
+    await expect(page.locator('#global-error')).toContainText('desde debe ser anterior');
+    await page.locator('#filters [name=hasta]').fill('2099-01-02'); await page.locator('#search-button').click();
+    await expect(page.locator('#table-status')).toContainText('No hay facturas');
+    await page.route('**/api/facturas?**', route => route.fulfill({ status: 409, json: { mensaje: 'Conflicto controlado', errores: [] } }));
+    await page.locator('#search-button').click(); await expect(page.locator('#global-error')).toContainText('Conflicto controlado');
+    await page.unroute('**/api/facturas?**');
+    await page.locator('#filters button[type=reset]').click(); await expect(page.locator('#invoice-table-wrap')).toBeVisible();
+    await expect(page.locator('#filter-summary')).toHaveText('Todas las facturas');
+    await expect(page.locator('#filter-chips button')).toHaveCount(0);
+    await page.screenshot({ path: '../tmp/browser-results/facturas-escritorio.png', fullPage: true });
+  } finally { for (const id of ids) await request.delete(`/api/facturas/${id}`); }
+});
+
+test('autorizadas conservan consulta y PDF con edición y eliminación bloqueadas', async ({ page, request }) => {
+  const c: CatalogosDTO = await (await request.get('/api/catalogos')).json(); const p = c.precios[0];
+  const response = await request.post('/api/facturas', { data: { fecha: '2026-10-23', clienteId: c.clientes[0].id, condicionIvaId: c.condicionesIva[0].id, puntoVentaId: c.puntosVenta[0].id, tipoMonedaId: p.tipoMonedaId, detalles: [{ articuloId: p.articuloId, cantidad: 1 }] } });
+  const draft: FacturaReporteDTO = await response.json();
+  // Fixture de UI explícita. No se envía ni se autoriza nada en ARCA.
+  const autorizada: FacturaReporteDTO = { ...draft, estadoArca: 'AUTORIZADA', informadaArca: true, editable: false, eliminable: false, numero: 123, tipoComprobante: 'FACTURA_PRUEBA', tipoAutorizacion: 'CAE', codigoAutorizacion: '12345678901234', vencimientoAutorizacion: '2026-11-20' };
+  await page.route('**/api/facturas?**', route => route.fulfill({ json: { content: [autorizada], page: 0, size: 8, totalElements: 1, totalPages: 1 } }));
+  await page.route(`**/api/facturas/${draft.id}`, route => route.fulfill({ json: autorizada }));
+  await page.goto('/'); await page.locator(`[data-detail="${draft.id}"]`).click();
+  await expect(page.locator('#detail-content')).toContainText('CAE 12345678901234');
+  await expect(page.locator('#edit-invoice')).toHaveCount(0); await expect(page.locator('#delete-invoice')).toHaveCount(0);
+  await expect(page.locator('#void-invoice')).toHaveCount(0);
+  await expect(page.locator('#detail-content')).toContainText('requieren el modo de homologación');
+  await expect(page.locator('#detail-actions a')).toBeVisible();
+  await request.delete(`/api/facturas/${draft.id}`);
+});
+
+test('nuevo producto: error conserva datos, alta persiste y selección conserva la factura', async ({ page, request }) => {
+  const c: CatalogosDTO = await (await request.get('/api/catalogos')).json();
+  const moneda = c.monedas.find(m => m.codigo === 'ARS')!;
+  const precio = c.precios.find(p => p.tipoMonedaId === moneda.id)!;
+  const codigo = `APP-${Date.now()}`;
+  await page.goto('/'); await expect(page.locator('#connection')).toHaveText('● API conectada');
+  await page.locator('#new-invoice').click();
+  const factura = page.locator('#invoice-form');
+  await expect(factura.locator('[name=tipoComprobante]')).toHaveValue('');
+  await factura.locator('[name=tipoComprobante]').selectOption('11');
+  await factura.locator('[name=clienteId]').selectOption(String(c.clientes[0].id));
+  await factura.locator('[name=puntoVentaId]').selectOption(String(c.puntosVenta[0].id));
+  // En Factura C la condición local está oculta y se completa automáticamente.
+  await expect(factura.locator('[name=condicionIvaId]')).toHaveValue(String(c.condicionesIva[0].id));
+  await factura.locator('[name=tipoMonedaId]').selectOption(String(moneda.id));
+  await factura.locator('[name=observaciones]').fill('Factura en proceso de carga');
+  await factura.locator('[name=condicionVenta]').fill('Contado');
+  await agregarArticulo(page,precio.articuloId);
+  await page.locator('.line-quantity').fill('2');
+  await page.locator('#add-line').click(); await page.locator('#manage-from-picker').click(); await page.locator('#new-product').click();
+  await page.locator('#cancel-product').click();
+  await expect(page.locator('#price-dialog')).toBeVisible();
+  await expect(factura.locator('[name=observaciones]')).toHaveValue('Factura en proceso de carga');
+  await expect(page.locator('.line-quantity')).toHaveValue('2');
+  await page.locator('#new-product').click();
+  const producto = page.locator('#product-form');
+  await producto.locator('[name=codigo]').fill(c.articulos[0].codigo);
+  await producto.locator('[name=descripcion]').fill('Marcador indeleble de prueba');
+  await producto.locator('[name=alicuotaIva]').fill('21');
+  await producto.locator('[name=precio]').fill('350.50');
+  await expect(producto.locator('[name=tipoMonedaId]')).toHaveValue(String(moneda.id));
+  await page.locator('#save-product').click();
+  await expect(page.locator('#product-error')).toContainText('Ya existe un producto');
+  await expect(producto.locator('[name=descripcion]')).toHaveValue('Marcador indeleble de prueba');
+  await expect(producto.locator('[name=precio]')).toHaveValue('350.50');
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
+  await page.screenshot({ path: '../tmp/browser-results/nuevo-producto-movil.png', fullPage: true });
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await producto.locator('[name=codigo]').fill(codigo);
+  const guardado = page.waitForResponse(r => r.request().method() === 'POST' && r.url().endsWith('/api/articulos'));
+  await page.locator('#save-product').click();
+  const respuesta = await guardado; expect(respuesta.status()).toBe(201);
+  const nuevo: { id: number } = await respuesta.json();
+  await expect(page.locator('#product-dialog')).not.toBeVisible();
+  await expect(page.locator('#price-status')).toContainText(`Producto ${codigo} creado`);
+  await expect(page.locator('#price-rows')).toContainText('Marcador indeleble de prueba');
+  await expect(page.locator('.line-quantity')).toHaveValue('2');
+  await page.locator('#back-to-selection').click();
+  await page.locator('#price-filters button[type=submit]').click();
+  await page.locator(`[data-price-article="${nuevo.id}"]`).click();
+  await expect(page.locator('#price-dialog')).not.toBeVisible();
+  await expect(page.locator('#form-lines tr')).toHaveCount(2);
+  await expect(page.locator('.line-quantity').first()).toHaveValue('2');
+  await expect(page.locator('.line-article').last()).toHaveValue(String(nuevo.id));
+  await expect(factura.locator('[name=condicionVenta]')).toHaveValue('Contado');
+  const creada = page.waitForResponse(r => r.request().method() === 'POST' && r.url().endsWith('/api/facturas'));
+  await page.locator('#save-invoice').click();
+  const resultado = await creada; expect(resultado.status()).toBe(201);
+  const f: FacturaReporteDTO = await resultado.json();
+  expect(f.detalles).toHaveLength(2); expect(f.total).toBe(2 * precio.precio + 350.5);
+  await page.reload(); await expect(page.locator('#connection')).toHaveText('● API conectada');
+  await page.locator('#new-invoice').click();
+  await expect(page.locator('#invoice-empty')).toBeVisible();
+  await agregarArticulo(page,nuevo.id);
+  await expect(page.locator('.line-article')).toHaveValue(String(nuevo.id));
+  await request.delete(`/api/facturas/${f.id}`);
+});
+
+test('edita una cantidad histórica fraccionaria y mantiene unidades enteras en renglones nuevos', async ({ page, request }) => {
+  const catalogos: CatalogosDTO = await (await request.get('/api/catalogos')).json();
+  const precio = catalogos.precios[0];
+  const creada = await request.post('/api/facturas', { data: {
+    fecha: '2026-11-12', clienteId: catalogos.clientes[0].id, condicionIvaId: catalogos.condicionesIva[0].id,
+    puntoVentaId: catalogos.puntosVenta[0].id, tipoMonedaId: precio.tipoMonedaId,
+    detalles: [{ articuloId: precio.articuloId, cantidad: 1.125 }]
+  } });
+  expect(creada.status()).toBe(201);
+  const { id } = await creada.json();
+  try {
+    await page.goto('/'); await accionFactura(page,id,'edit');
+    const cantidad = page.locator('.line-quantity').first();
+    await expect(cantidad).toHaveValue('1.125'); await expect(cantidad).toHaveAttribute('step', '0.001');
+    await cantidad.fill('3.125'); await page.locator('#reset-invoice').click(); await page.locator('#confirm-yes').click();
+    await expect(cantidad).toHaveValue('1.125'); await expect(page.locator('#save-invoice')).toHaveText('Guardar cambios');
+    await cantidad.fill('2.125'); await page.locator('#add-line').click();
+    await page.locator('#price-filters button[type=submit]').click();
+    await page.locator('#price-rows [data-price-article]').first().click();
+    await expect(page.locator('#price-dialog')).not.toBeVisible();
+    await expect(page.locator('.line-quantity').last()).toHaveAttribute('step', '1');
+    await page.locator('[data-remove="1"]').click(); await expect(page.locator('.line-article')).toBeFocused();
+    await page.locator('#save-invoice').click(); await expect(page.locator('#invoice-dialog')).not.toBeVisible();
+    const leida: FacturaReporteDTO = await (await request.get(`/api/facturas/${id}`)).json();
+    expect(leida.detalles[0].cantidad).toBe(2.125);
+  } finally { await request.delete(`/api/facturas/${id}`); }
+});
+
+test('recupera catálogos y abre el borrador en el modo de la instancia sin envío fiscal', async ({ page, request }) => {
+  const catalogos = await (await request.get('/api/catalogos')).json();
+  await page.route(/\/api\/catalogos(?:\?.*)?$/, route => route.fulfill({ status: 503, json: {} }));
+  await page.goto('/'); await expect(page.locator('#global-error')).toBeVisible();
+  await expect(page.locator('#new-invoice')).toBeDisabled();
+  await page.unroute(/\/api\/catalogos(?:\?.*)?$/);
+  await page.route(/\/api\/catalogos(?:\?.*)?$/, route => route.fulfill({ json: { ...catalogos, homologacionHabilitada: true } }));
+  await page.locator('#reload').click(); await page.locator('#new-invoice').click();
+  await expect(page.locator('#invoice-form [name=tipoComprobante]')).toHaveValue('11');
+  for (const [width, height] of [[320, 740], [390, 844], [768, 1024], [1366, 768], [1920, 1080]]) {
+    await page.setViewportSize({ width, height });
+    expect(await page.evaluate(() => {
+      const dialog = document.querySelector<HTMLDialogElement>('#invoice-dialog')!;
+      const detalles = dialog.querySelector<HTMLElement>('.table-wrap')!;
+      return document.documentElement.scrollWidth <= innerWidth && dialog.scrollWidth <= dialog.clientWidth
+        && detalles.scrollWidth <= detalles.clientWidth;
+    })).toBe(true);
+  }
+  await page.locator('#add-line').focus(); await page.keyboard.press('Enter');
+  await expect(page.locator('#price-dialog')).toBeVisible(); await page.keyboard.press('Escape');
+  await expect(page.locator('#add-line')).toBeFocused(); await page.keyboard.press('Escape');
+  await expect(page.locator('#new-invoice')).toBeFocused();
+});
+
+
+test('crea una lista, carga precios, filtra productos y factura con la lista elegida', async ({ page, request }) => {
+  const errors: string[] = []; page.on('pageerror', e => errors.push(e.message));
+  const c: CatalogosDTO = await (await request.get('/api/catalogos')).json();
+  const moneda = c.monedas.find(m => m.codigo === 'ARS')!, articulo = c.articulos.find(a => a.id === 1)!;
+  await page.goto('/'); await expect(page.locator('#connection')).toHaveText('● API conectada');
+  await page.locator('#new-invoice').click();
+  const form = page.locator('#invoice-form');
+  await form.locator('[name=tipoComprobante]').selectOption('11');
+  await form.locator('[name=clienteId]').selectOption('1');
+  await form.locator('[name=puntoVentaId]').selectOption(String(c.puntosVenta[0].id));
+  await expect(form.locator('[name=condicionIvaId]')).toHaveValue(String(c.condicionesIva[0].id));
+  await form.locator('[name=tipoMonedaId]').selectOption(String(moneda.id));
+  await form.locator('[name=observaciones]').fill('Borrador con lista de precios');
+  await page.locator('#add-line').click(); await page.locator('#manage-from-picker').click(); await page.locator('#new-price-list').click();
+  const nombre = `Especial navegador ${Date.now()}`;
+  await page.locator('#list-form [name=nombre]').fill(nombre);
+  await page.locator('#list-form button:not([type=button])').click();
+  await expect(page.locator('#list-dialog')).not.toBeVisible();
+  const lista = await page.locator('#price-filters [name=listaPrecioId]').inputValue();
+  await expect(page.locator('#price-rows tr')).toHaveCount(0);
+  await page.locator('#set-price').click();
+  const precio = page.locator('#price-entry-form');
+  await expect(precio.locator('[name=listaPrecioId]')).toHaveValue(lista);
+  await precio.locator('[name=articuloId]').selectOption(String(articulo.id));
+  await precio.locator('[name=precio]').fill('800');
+  await precio.locator('button:not([type=button])').click();
+  await expect(page.locator('#price-entry-dialog')).not.toBeVisible();
+  await expect(page.locator('#price-rows tr')).toHaveCount(1);
+  await expect(page.locator('#price-rows [data-price-article]')).toHaveCount(0);
+  await page.locator('#back-to-selection').click();
+  await page.locator('#price-filters button[type=submit]').click();
+  await expect(page.locator('#price-rows [data-price-article]')).toBeEnabled();
+  await page.locator('#price-rows [data-price-article]').click();
+  await expect(page.locator('#price-dialog')).not.toBeVisible();
+  await expect(form.locator('[name=observaciones]')).toHaveValue('Borrador con lista de precios');
+  await expect(form.locator('[name=listaPrecioId]')).toHaveValue(lista);
+  await page.locator('.line-quantity').fill('2');
+  await expect(page.locator('#preview-total')).toContainText('1.600,00');
+  const response = page.waitForResponse(r => r.url().endsWith('/api/facturas') && r.request().method() === 'POST');
+  await page.locator('#save-invoice').click();
+  const f: FacturaReporteDTO = await (await response).json();
+  expect(f.listaPrecioId).toBe(Number(lista)); expect(f.total).toBe(1600);
+  await expect(page.locator('#invoice-dialog')).not.toBeVisible();
+  await page.locator('#filter-price-list').selectOption(lista); await page.locator('#search-button').click();
+  await expect(page.locator('#invoice-rows tr')).toHaveCount(1);
+  await accionFactura(page,f.id,'edit');
+  await expect(form.locator('[name=listaPrecioId]')).toHaveValue(lista);
+  await expect(page.locator('#preview-total')).toContainText('1.600,00');
+  await page.screenshot({ path: '../tmp/browser-results/listas-precios.png', fullPage: true });
+  expect(errors).toEqual([]);
+});
